@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hotel Sales Performance Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f9f9f9;
+    }
+    h2 { text-align: center; }
+    #controls { text-align: center; margin: 15px; }
+    #fileInput { margin-top: 10px; }
+    #charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .chart-box {
+      background: #fff;
+      padding: 15px;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      min-height: 300px;
+    }
+    @media(max-width:900px){
+      #charts { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <h2>🏨 Hotel Sales Performance & Discount Optimization Dashboard</h2>
+  <div id="controls">
+    <input type="file" id="fileInput" accept=".json" />
+  </div>
+
+  <div id="charts">
+    <div id="adrChart" class="chart-box"></div>
+    <div id="occupancyChart" class="chart-box"></div>
+    <div id="revparChart" class="chart-box"></div>
+    <div id="priceComparisonChart" class="chart-box"></div>
+    <div id="discountImpactChart" class="chart-box"></div>
+    <div id="leadTimeChart" class="chart-box"></div>
+    <div id="starsChart" class="chart-box"></div>
+    <div id="revenueTrendChart" class="chart-box"></div>
+    <!-- New problem-solution charts -->
+    <div id="discountEffectivenessChart" class="chart-box"></div>
+    <div id="elasticityChart" class="chart-box"></div>
+    <div id="segmentationChart" class="chart-box"></div>
+  </div>
+
+  <script>
+    document.getElementById('fileInput').addEventListener('change', handleFile);
+
+    function handleFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = JSON.parse(e.target.result);
+          const records = Array.isArray(data) ? data : [data];
+          buildDashboard(records);
+        } catch(err){
+          alert('Invalid JSON: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function buildDashboard(data){
+      // Preprocess
+      data = data.map(d=>({
+        snapshotDate: new Date(d["Snapshot Date"]),
+        checkinDate: new Date(d["Checkin Date"]),
+        days: +d.Days,
+        originalPrice: +d["Original Price"],
+        discountPrice: +d["Discount Price"],
+        discountCode: d["Discount Code"],
+        availableRooms: +d["Available Rooms"],
+        hotelName: d["Hotel Name"],
+        hotelStars: +d["Hotel Stars"]
+      }));
+
+      // 1. ADR
+      const hotels = [...new Set(data.map(d=>d.hotelName))];
+      const adr = hotels.map(h=>{
+        const subset = data.filter(d=>d.hotelName===h);
+        return subset.reduce((sum,d)=> sum + (d.discountPrice/d.days),0)/subset.length;
+      });
+      Plotly.newPlot('adrChart',[{x:hotels,y:adr,type:'bar'}],{title:'Average Daily Rate (ADR) by Hotel',xaxis:{automargin:true}});
+
+      // 2. Occupancy Availability
+      const rooms = hotels.map(h=> data.filter(d=>d.hotelName===h).reduce((s,d)=>s+d.availableRooms,0));
+      Plotly.newPlot('occupancyChart',[{x:hotels,y:rooms,type:'bar'}],{title:'Total Available Rooms by Hotel'});
+
+      // 3. RevPAR
+      const revpar = hotels.map(h=>{
+        const subset = data.filter(d=>d.hotelName===h);
+        return subset.reduce((s,d)=> s + (d.discountPrice/d.days),0)/subset.length;
+      });
+      Plotly.newPlot('revparChart',[{x:hotels,y:revpar,type:'bar'}],{title:'RevPAR (simplified) by Hotel'});
+
+      // 4. Price Comparison
+      Plotly.newPlot('priceComparisonChart',[
+        {x:hotels,y:hotels.map(h=> data.filter(d=>d.hotelName===h).reduce((s,d)=>s+d.originalPrice,0)), name:'Original', type:'bar'},
+        {x:hotels,y:hotels.map(h=> data.filter(d=>d.hotelName===h).reduce((s,d)=>s+d.discountPrice,0)), name:'Discount', type:'bar'}
+      ],{barmode:'group', title:'Original vs Discount Price'});
+
+      // 5. Discount Impact
+      const codes = [...new Set(data.map(d=>d.discountCode))];
+      const codeRev = codes.map(c=> data.filter(d=>d.discountCode===c).reduce((s,d)=>s+d.discountPrice,0));
+      Plotly.newPlot('discountImpactChart',[{x:codes,y:codeRev,type:'bar'}],{title:'Revenue by Discount Code'});
+
+      // 6. Lead Time
+      const leadTimes = data.map(d=> (d.checkinDate - d.snapshotDate)/(1000*3600*24));
+      Plotly.newPlot('leadTimeChart',[{x:leadTimes,type:'histogram'}],{title:'Booking Lead Time (days)'});
+
+      // 7. Hotel Stars Performance
+      const stars = [...new Set(data.map(d=>d.hotelStars))];
+      const starsAvg = stars.map(s=>{
+        const subset = data.filter(d=>d.hotelStars===s);
+        return subset.reduce((s2,d)=>s2+d.discountPrice,0)/subset.length;
+      });
+      Plotly.newPlot('starsChart',[{x:stars,y:starsAvg,type:'bar'}],{title:'Avg Revenue by Hotel Stars'});
+
+      // 8. Revenue Trend
+      const grouped = {};
+      data.forEach(d=>{
+        const key = d.snapshotDate.toISOString().split('T')[0];
+        if(!grouped[key]) grouped[key]=0;
+        grouped[key]+=d.discountPrice;
+      });
+      const dates = Object.keys(grouped).sort();
+      const values = dates.map(k=>grouped[k]);
+      Plotly.newPlot('revenueTrendChart',[{x:dates,y:values,mode:'lines+markers'}],{title:'Revenue Trend Over Time'});
+
+      // -----------------------------
+      // 🚀 NEW PROBLEM-SOLUTION CHARTS
+      // -----------------------------
+
+      // 9. Discount Effectiveness (Available Rooms by Discount Code)
+      const codeAvail = codes.map(c=> data.filter(d=>d.discountCode===c).reduce((s,d)=>s+d.availableRooms,0)/data.filter(d=>d.discountCode===c).length);
+      Plotly.newPlot('discountEffectivenessChart',[{x:codes,y:codeAvail,type:'bar'}],{title:'Discount Effectiveness (Avg Available Rooms by Code)'}); 
+
+      // 10. Price Elasticity (Discount % vs Available Rooms)
+      const discountPerc = data.map(d=> ((d.originalPrice - d.discountPrice)/d.originalPrice*100));
+      Plotly.newPlot('elasticityChart',[{x:discountPerc,y:data.map(d=>d.availableRooms),mode:'markers'}],{title:'Price Elasticity: Discount % vs Available Rooms',xaxis:{title:'Discount %'},yaxis:{title:'Available Rooms'}});
+
+      // 11. Hotel Segmentation (Bubble: Avg Price vs Avg Discount %)
+      const segmentation = hotels.map(h=>{
+        const subset = data.filter(d=>d.hotelName===h);
+        const avgPrice = subset.reduce((s,d)=>s+d.discountPrice,0)/subset.length;
+        const avgDiscount = subset.reduce((s,d)=>s+((d.originalPrice-d.discountPrice)/d.originalPrice*100),0)/subset.length;
+        const avgRooms = subset.reduce((s,d)=>s+d.availableRooms,0)/subset.length;
+        const stars = subset[0].hotelStars;
+        return {hotel:h, avgPrice, avgDiscount, avgRooms, stars};
+      });
+      Plotly.newPlot('segmentationChart',[{
+        x: segmentation.map(s=>s.avgPrice),
+        y: segmentation.map(s=>s.avgDiscount),
+        text: segmentation.map(s=>s.hotel),
+        mode:'markers',
+        marker:{size: segmentation.map(s=>s.avgRooms*2), color: segmentation.map(s=>s.stars), colorscale:'Viridis', showscale:true}
+      }],{title:'Hotel Segmentation: Price vs Discount % (Bubble=Rooms, Color=Stars)',xaxis:{title:'Avg Discount Price'},yaxis:{title:'Avg Discount %'}});
+
+    }
+  </script>
+</body>
+</html>
