@@ -1,1 +1,1 @@
-# House-Price-Prediction-
+# Hotel Discount-Prediction-
